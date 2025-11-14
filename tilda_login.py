@@ -489,10 +489,18 @@ def save_request_specific_json_files(intercepted_requests: dict, context, page: 
         # Сохраняем отдельные файлы для каждого типа запроса
         for request_type in ["getleads", "getproductslist"]:
             if intercepted_requests.get(request_type):
-                # Используем cookies и headers из перехваченного запроса если они есть
+                # Используем cookies и headers из перехваченного запроса если они есть и не пустые
                 request_data = intercepted_requests[request_type]
-                request_cookies = request_data.get("cookies", cookie_dict)
-                request_headers = request_data.get("headers", headers)
+                request_cookies = request_data.get("cookies", {})
+                request_headers = request_data.get("headers", {})
+
+                # Если перехваченные cookies пустые, используем cookies из браузера
+                if not request_cookies:
+                    request_cookies = cookie_dict
+
+                # Если перехваченные headers пустые, используем стандартные headers
+                if not request_headers:
+                    request_headers = headers
 
                 # Создаем JSON с cookies и headers
                 json_data = {
