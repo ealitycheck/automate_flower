@@ -272,13 +272,12 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
             print("Страница загружена, ожидание загрузки всех элементов...")
             page.wait_for_timeout(3000)
 
-            # Проверка и решение капчи ПЕРЕД заполнением формы
+            # Проверка и решение капчи ПЕРЕД заполнением формы (опционально)
             print("\n--- Этап 1: Определение и решение капчи ---")
-            if not solve_and_inject_captcha(page, captcha_solver):
-                print("Не удалось решить капчу")
-                # Делаем скриншот для отладки
-                page.screenshot(path="tilda_captcha_failed.png")
-                return False
+            captcha_result = solve_and_inject_captcha(page, captcha_solver)
+            if not captcha_result:
+                print("Предупреждение: Капча не была решена (возможно, её нет на странице)")
+                # Не возвращаем False - продолжаем, так как капча может быть необязательной
 
             print("\n--- Этап 2: Заполнение формы входа ---")
             # Ввод email
@@ -305,10 +304,34 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
 
             # Ожидание успешного входа
             print("Ожидание перенаправления...")
-            try:
-                # Ждем изменения URL или появления элементов личного кабинета
-                page.wait_for_url("**/projects/**", timeout=15000)
-                print("✓ Успешный вход в аккаунт Tilda!")
+            page.wait_for_timeout(3000)  # Даем время на обработку
+
+            # Проверяем успешность входа несколькими способами
+            current_url = page.url
+            print(f"Текущий URL: {current_url}")
+
+            # Способ 1: Проверка URL (исключаем страницу логина)
+            is_login_page = "/login" in current_url.lower()
+
+            # Способ 2: Проверка отсутствия формы входа
+            login_form_exists = page.locator('form:has(input[type="password"])').count() > 0
+
+            # Способ 3: Проверка наличия элементов личного кабинета
+            dashboard_elements = page.locator('[class*="dashboard"], [class*="projects"], [class*="header-user"], .tn-top-panel').count()
+
+            # Способ 4: Проверка на наличие ошибок входа
+            error_text = page.locator('.error, .alert-danger, [class*="error-message"]').first
+            has_login_error = error_text.count() > 0
+
+            print(f"Анализ состояния:")
+            print(f"  - Страница логина: {is_login_page}")
+            print(f"  - Форма входа существует: {login_form_exists}")
+            print(f"  - Элементы личного кабинета найдены: {dashboard_elements}")
+            print(f"  - Ошибки входа: {has_login_error}")
+
+            # Определяем успешность входа
+            if not is_login_page and not login_form_exists and dashboard_elements > 0:
+                print("\n✓ Успешный вход в аккаунт Tilda!")
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")
@@ -319,21 +342,34 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 print(f"Получено {len(cookies)} cookies")
 
                 # Небольшая пауза для просмотра результата
-                page.wait_for_timeout(3000)
+                page.wait_for_timeout(2000)
 
                 return True
 
-            except PlaywrightTimeout:
-                print("Ошибка: Таймаут при ожидании входа")
+            elif not is_login_page and not login_form_exists:
+                # Вход выполнен, но элементы кабинета не найдены
+                print("\n✓ Вход выполнен (форма логина исчезла, но элементы кабинета не определены)")
+                print("Это может быть нормально, если структура страницы отличается")
+
+                page.screenshot(path="tilda_logged_in.png")
+                print("Скриншот сохранен: tilda_logged_in.png")
+
+                cookies = context.cookies()
+                print(f"Получено {len(cookies)} cookies")
+
+                return True
+
+            else:
+                print("\n✗ Ошибка: Вход не выполнен")
                 print("Возможные причины:")
                 print("  - Неверный email или пароль")
                 print("  - Капча не была решена правильно")
                 print("  - Проблемы с сетью")
 
                 # Проверка на сообщения об ошибках
-                error_messages = page.locator('.error, .alert-danger, [class*="error"]').all_text_contents()
-                if error_messages:
-                    print(f"Сообщения об ошибках: {error_messages}")
+                if has_login_error:
+                    error_messages = page.locator('.error, .alert-danger, [class*="error"]').all_text_contents()
+                    print(f"Сообщения об ошибках: {[msg for msg in error_messages if msg.strip()][:5]}")  # Показываем только первые 5
 
                 page.screenshot(path="tilda_error.png")
                 print("Скриншот ошибки сохранен: tilda_error.png")
