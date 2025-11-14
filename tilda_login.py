@@ -329,36 +329,63 @@ def setup_request_interceptor(page: Page):
 
     def handle_request(request: Request):
         # Фильтруем запросы к API лидов
-        if "projects/submit/leads" in request.url or "getleads" in request.url.lower():
-            print("\n" + "="*60)
-            print(f"🔍 Перехвачен запрос: {request.method} {request.url}")
-            print("="*60)
-
-            # Получаем заголовки
-            headers = request.headers
-            print("\n📋 Headers:")
-            print("-"*60)
-            for key, value in headers.items():
-                print(f"{key}: {value}")
-
-            # Получаем данные POST запроса если есть
+        if "projects/submit/leads" in request.url:
             try:
                 post_data = request.post_data
-                if post_data:
+
+                # Проверяем, содержит ли POST данные "comm": "getleads" или comm=getleads
+                if post_data and ("comm=getleads" in post_data or '"comm": "getleads"' in post_data or '"comm":"getleads"' in post_data):
+                    print("\n" + "="*70)
+                    print("🎯 ПЕРЕХВАЧЕН ЦЕЛЕВОЙ ЗАПРОС getleads!")
+                    print("="*70)
+
+                    # Получаем заголовки
+                    headers = dict(request.headers)
+
+                    # Извлекаем cookies из заголовка
+                    cookie_header = headers.get("cookie", "")
+                    cookies_dict = {}
+                    if cookie_header:
+                        for cookie_pair in cookie_header.split("; "):
+                            if "=" in cookie_pair:
+                                key, value = cookie_pair.split("=", 1)
+                                cookies_dict[key] = value
+
+                    # Удаляем cookie из headers (будет отдельно)
+                    headers_without_cookie = {k: v for k, v in headers.items() if k.lower() != "cookie"}
+
+                    print("\n📍 URL запроса:")
+                    print("-"*70)
+                    print(f'burp0_url = "{request.url}"')
+
+                    print("\n🍪 Cookies:")
+                    print("-"*70)
+                    formatted_cookies = "{" + ", ".join([f'"{k}": "{v}"' for k, v in cookies_dict.items()]) + "}"
+                    print(f"burp0_cookies = {formatted_cookies}")
+
+                    print("\n📋 Headers:")
+                    print("-"*70)
+                    formatted_headers = "{" + ", ".join([f'"{k}": "{v}"' for k, v in headers_without_cookie.items()]) + "}"
+                    print(f"burp0_headers = {formatted_headers}")
+
                     print("\n📦 POST Data:")
-                    print("-"*60)
+                    print("-"*70)
                     print(post_data)
-            except:
-                pass
 
-            print("="*60 + "\n")
+                    print("\n" + "="*70)
+                    print("✅ Данные готовы для повторного использования!")
+                    print("="*70 + "\n")
 
-            # Сохраняем для дальнейшего использования
-            intercepted_requests.append({
-                "url": request.url,
-                "method": request.method,
-                "headers": headers
-            })
+                    # Сохраняем для дальнейшего использования
+                    intercepted_requests.append({
+                        "url": request.url,
+                        "method": request.method,
+                        "headers": headers_without_cookie,
+                        "cookies": cookies_dict,
+                        "post_data": post_data
+                    })
+            except Exception as e:
+                print(f"Ошибка при обработке запроса: {e}")
 
     page.on("request", handle_request)
     return intercepted_requests
