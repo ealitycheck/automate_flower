@@ -274,6 +274,25 @@ def solve_and_inject_captcha(page: Page, captcha_solver: RuCaptchaSolver) -> boo
         return False
 
 
+def format_cookies_for_burp(cookies: list) -> str:
+    """
+    Форматирование cookies в формат Burp Suite (Python dict)
+
+    Args:
+        cookies: Список cookies от Playwright
+
+    Returns:
+        Строка с форматированными cookies в виде Python словаря
+    """
+    cookie_dict = {cookie['name']: cookie['value'] for cookie in cookies}
+
+    # Форматируем в виде Python словаря с кавычками
+    formatted_items = [f'"{key}": "{value}"' for key, value in cookie_dict.items()]
+    formatted_dict = "{" + ", ".join(formatted_items) + "}"
+
+    return f"burp0_cookies = {formatted_dict}"
+
+
 def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
     """
     Основная функция входа на Tilda
@@ -377,13 +396,29 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
             if not is_login_page and not login_form_exists and dashboard_elements > 0:
                 print("\n✓ Успешный вход в аккаунт Tilda!")
 
+                # Переход на страницу лидов
+                print("\n--- Этап 4: Переход на страницу лидов ---")
+                leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
+                print(f"Переход на {leads_url}...")
+                page.goto(leads_url, wait_until="networkidle")
+                page.wait_for_timeout(2000)
+                print("Страница лидов загружена")
+
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")
                 print("Скриншот сохранен: tilda_logged_in.png")
 
-                # Сохранение cookies для последующего использования
+                # Получение и вывод cookies для Burp Suite
                 cookies = context.cookies()
-                print(f"Получено {len(cookies)} cookies")
+                print(f"\nПолучено {len(cookies)} cookies")
+
+                # Форматирование cookies для Burp Suite
+                burp_cookies = format_cookies_for_burp(cookies)
+                print("\n" + "="*60)
+                print("Cookies в формате Burp Suite:")
+                print("="*60)
+                print(burp_cookies)
+                print("="*60)
 
                 # Небольшая пауза для просмотра результата
                 page.wait_for_timeout(2000)
@@ -395,11 +430,29 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 print("\n✓ Вход выполнен (форма логина исчезла, но элементы кабинета не определены)")
                 print("Это может быть нормально, если структура страницы отличается")
 
+                # Переход на страницу лидов
+                print("\n--- Этап 4: Переход на страницу лидов ---")
+                leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
+                print(f"Переход на {leads_url}...")
+                page.goto(leads_url, wait_until="networkidle")
+                page.wait_for_timeout(2000)
+                print("Страница лидов загружена")
+
+                # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")
                 print("Скриншот сохранен: tilda_logged_in.png")
 
+                # Получение и вывод cookies для Burp Suite
                 cookies = context.cookies()
-                print(f"Получено {len(cookies)} cookies")
+                print(f"\nПолучено {len(cookies)} cookies")
+
+                # Форматирование cookies для Burp Suite
+                burp_cookies = format_cookies_for_burp(cookies)
+                print("\n" + "="*60)
+                print("Cookies в формате Burp Suite:")
+                print("="*60)
+                print(burp_cookies)
+                print("="*60)
 
                 return True
 
