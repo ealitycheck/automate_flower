@@ -34,10 +34,74 @@ def detect_captcha_type(page: Page, wait_for_load: bool = True) -> dict:
         print("Ожидание загрузки капчи...")
         # Ждем появления iframe капчи (до 10 секунд)
         try:
-            page.wait_for_selector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="captcha-api.yandex"]', timeout=10000)
+            page.wait_for_selector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="captcha-api.yandex"], iframe[src*="smartcaptcha"]', timeout=10000)
             page.wait_for_timeout(2000)  # Дополнительная пауза для полной загрузки
         except PlaywrightTimeout:
             print("Капча не загрузилась за отведенное время, продолжаем поиск...")
+
+    # ВАЖНО: Проверяем Yandex ПЕРВЫМ, так как он тоже может использовать data-sitekey
+    # Проверка Yandex SmartCaptcha
+    print("Проверка Yandex SmartCaptcha...")
+    try:
+        yandex_info = page.evaluate("""() => {
+            // Способ 1: проверка iframe с yandex
+            const yandexIframe = document.querySelector('iframe[src*="smartcaptcha"], iframe[src*="captcha-api.yandex"]');
+            if (yandexIframe) {
+                // Ищем родительский элемент с ключом
+                let parent = yandexIframe.parentElement;
+                while (parent) {
+                    const key = parent.getAttribute('data-sitekey') ||
+                               parent.getAttribute('data-smartcaptcha-sitekey');
+                    if (key) return key;
+                    parent = parent.parentElement;
+                }
+            }
+
+            // Способ 2: прямой поиск элемента с data-smartcaptcha-sitekey
+            const elem = document.querySelector('[data-smartcaptcha-sitekey]');
+            if (elem) return elem.getAttribute('data-smartcaptcha-sitekey');
+
+            // Способ 3: поиск в скриптах
+            const scripts = Array.from(document.querySelectorAll('script'));
+            for (const script of scripts) {
+                const text = script.textContent || script.innerHTML;
+                if (text.includes('smartcaptcha') || text.includes('yandex')) {
+                    const match = text.match(/sitekey['":\s]+['"]([^'"]+)['"]/i);
+                    if (match) return match[1];
+                }
+            }
+
+            return null;
+        }""")
+        if yandex_info:
+            print(f"Обнаружена Yandex SmartCaptcha, site-key: {yandex_info}")
+            return {"type": "yandex", "site_key": yandex_info}
+    except Exception as e:
+        print(f"Ошибка при определении Yandex SmartCaptcha: {e}")
+
+    # Проверка hCaptcha
+    print("Проверка hCaptcha...")
+    hcaptcha_iframe = page.locator('iframe[src*="hcaptcha.com"]').first
+    if hcaptcha_iframe.count() > 0:
+        try:
+            site_key = page.evaluate("""() => {
+                const iframe = document.querySelector('iframe[src*="hcaptcha.com"]');
+                if (iframe) {
+                    // Ищем родительский элемент с data-sitekey
+                    let parent = iframe.parentElement;
+                    while (parent) {
+                        const key = parent.getAttribute('data-sitekey');
+                        if (key) return key;
+                        parent = parent.parentElement;
+                    }
+                }
+                return null;
+            }""")
+            if site_key:
+                print(f"Обнаружена hCaptcha, site-key: {site_key}")
+                return {"type": "hcaptcha", "site_key": site_key}
+        except Exception as e:
+            print(f"Ошибка при определении hCaptcha: {e}")
 
     # Проверка reCAPTCHA v2 - расширенный поиск
     print("Проверка reCAPTCHA v2...")
@@ -50,26 +114,31 @@ def detect_captcha_type(page: Page, wait_for_load: bool = True) -> dict:
                 return elem.getAttribute('data-sitekey');
             }
 
-            // Способ 2: любой элемент с data-sitekey
-            elem = document.querySelector('[data-sitekey]');
-            if (elem) {
-                return elem.getAttribute('data-sitekey');
+            // Способ 2: проверка iframe с google.com/recaptcha
+            const recaptchaIframe = document.querySelector('iframe[src*="google.com/recaptcha"]');
+            if (recaptchaIframe) {
+                // Ищем родительский элемент с data-sitekey
+                let parent = recaptchaIframe.parentElement;
+                while (parent) {
+                    const key = parent.getAttribute('data-sitekey');
+                    if (key) return key;
+                    parent = parent.parentElement;
+                }
+
+                // Пытаемся извлечь из src iframe
+                const src = recaptchaIframe.getAttribute('src');
+                const match = src.match(/[&?]k=([^&]+)/);
+                if (match) return match[1];
             }
 
-            // Способ 3: поиск в скриптах
+            // Способ 3: поиск в скриптах с упоминанием grecaptcha
             const scripts = Array.from(document.querySelectorAll('script'));
             for (const script of scripts) {
                 const text = script.textContent || script.innerHTML;
-                const match = text.match(/['"&?]sitekey['"]?\s*[:=]\s*['"]([^'"]+)['"]/i);
-                if (match) return match[1];
-            }
-
-            // Способ 4: поиск в iframe src
-            const iframes = Array.from(document.querySelectorAll('iframe[src*="recaptcha"]'));
-            for (const iframe of iframes) {
-                const src = iframe.getAttribute('src');
-                const match = src.match(/[&?]k=([^&]+)/);
-                if (match) return match[1];
+                if (text.includes('grecaptcha') || text.includes('google.com/recaptcha')) {
+                    const match = text.match(/['"&?]sitekey['"]?\s*[:=]\s*['"]([^'"]+)['"]/i);
+                    if (match) return match[1];
+                }
             }
 
             return null;
@@ -95,31 +164,6 @@ def detect_captcha_type(page: Page, wait_for_load: bool = True) -> dict:
     if recaptcha_v3_key:
         print(f"Обнаружена reCAPTCHA v3, site-key: {recaptcha_v3_key}")
         return {"type": "recaptcha_v3", "site_key": recaptcha_v3_key}
-
-    # Проверка hCaptcha
-    print("Проверка hCaptcha...")
-    hcaptcha = page.locator('iframe[src*="hcaptcha.com"]').first
-    if hcaptcha.count() > 0:
-        try:
-            site_key = page.evaluate("""() => {
-                const elem = document.querySelector('[data-sitekey]');
-                return elem ? elem.getAttribute('data-sitekey') : null;
-            }""")
-            if site_key:
-                print(f"Обнаружена hCaptcha, site-key: {site_key}")
-                return {"type": "hcaptcha", "site_key": site_key}
-        except Exception as e:
-            print(f"Ошибка при определении hCaptcha: {e}")
-
-    # Проверка Yandex SmartCaptcha
-    print("Проверка Yandex SmartCaptcha...")
-    yandex_captcha = page.evaluate("""() => {
-        const elem = document.querySelector('[data-smartcaptcha-sitekey]');
-        return elem ? elem.getAttribute('data-smartcaptcha-sitekey') : null;
-    }""")
-    if yandex_captcha:
-        print(f"Обнаружена Yandex SmartCaptcha, site-key: {yandex_captcha}")
-        return {"type": "yandex", "site_key": yandex_captcha}
 
     print("Капча не обнаружена на странице")
     return {"type": None, "site_key": None}
