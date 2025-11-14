@@ -4,6 +4,10 @@
 # Session files
 tilda_session.json
 
+# Burp Suite export files
+burp0_cookies.json
+burp0_headers.json
+
 # Screenshots
 *.png
 
