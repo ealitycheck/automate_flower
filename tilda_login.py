@@ -888,13 +888,30 @@ if __name__ == "__main__":
     print("=" * 60)
     print()
 
-    # Запуск в headless режиме (без графического интерфейса)
-    # Для режима с видимым браузером установите headless=False
-    success = login_to_tilda(headless=True, slow_mo=0)
+    # Ожидание файла-триггера
+    trigger_file = Path("need_update_ses")
+    print(f"Ожидание файла-триггера: {trigger_file}")
 
-    if success:
-        print("\n✓ Скрипт завершен успешно!")
-        exit(0)
-    else:
-        print("\n✗ Скрипт завершен с ошибкой")
-        exit(1)
+    while not trigger_file.exists():
+        time.sleep(1)  # Проверяем каждую секунду
+
+    print(f"✓ Файл-триггер обнаружен, запуск скрипта...")
+
+    try:
+        # Запуск в headless режиме (без графического интерфейса)
+        # Для режима с видимым браузером установите headless=False
+        success = login_to_tilda(headless=True, slow_mo=0)
+
+        if success:
+            print("\n✓ Скрипт завершен успешно!")
+            exit_code = 0
+        else:
+            print("\n✗ Скрипт завершен с ошибкой")
+            exit_code = 1
+    finally:
+        # Удаление файла-триггера в любом случае
+        if trigger_file.exists():
+            trigger_file.unlink()
+            print(f"✓ Файл-триггер {trigger_file} удален")
+
+    exit(exit_code)

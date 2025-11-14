@@ -4,6 +4,9 @@
 # Session files
 tilda_session.json
 
+# Trigger file
+need_update_ses
+
 # Burp Suite export files
 burp0_cookies.json
 burp0_headers.json
