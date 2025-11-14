@@ -621,6 +621,17 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                             print("Ожидание загрузки API запросов...")
                             page.wait_for_timeout(3000)
 
+                            # Переход на страницу store для перехвата getproductslist
+                            print("\n--- Этап 6: Переход на страницу store ---")
+                            store_url = "https://store.tilda.ru/store/?projectid=2050405"
+                            print(f"Попытка загрузить страницу store: {store_url}")
+                            page.goto(store_url, wait_until="domcontentloaded", timeout=30000)
+                            print(f"Страница store загружена, текущий URL: {page.url}")
+
+                            # Ждем загрузку API запроса getproductslist
+                            print("Ожидание загрузки API запросов getproductslist...")
+                            page.wait_for_timeout(3000)
+
                             # Сохранение cookies и headers в JSON файлы
                             print("\n--- Сохранение cookies и headers в JSON файлы ---")
                             save_cookies_and_headers_to_files(context, page)
@@ -750,6 +761,14 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 page.wait_for_timeout(3000)  # Ждем API запросы
                 print("Страница лидов загружена")
 
+                # Переход на страницу store для перехвата getproductslist
+                print("\n--- Этап 6: Переход на страницу store ---")
+                store_url = "https://store.tilda.ru/store/?projectid=2050405"
+                print(f"Переход на {store_url}...")
+                page.goto(store_url, wait_until="networkidle")
+                page.wait_for_timeout(3000)  # Ждем API запросы getproductslist
+                print("Страница store загружена")
+
                 # Сохранение сессии для последующего использования
                 print("\n--- Сохранение сессии ---")
                 save_session(context)
@@ -800,6 +819,14 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 page.goto(leads_url, wait_until="networkidle")
                 page.wait_for_timeout(3000)  # Ждем API запросы
                 print("Страница лидов загружена")
+
+                # Переход на страницу store для перехвата getproductslist
+                print("\n--- Этап 6: Переход на страницу store ---")
+                store_url = "https://store.tilda.ru/store/?projectid=2050405"
+                print(f"Переход на {store_url}...")
+                page.goto(store_url, wait_until="networkidle")
+                page.wait_for_timeout(3000)  # Ждем API запросы getproductslist
+                print("Страница store загружена")
 
                 # Сохранение сессии для последующего использования
                 print("\n--- Сохранение сессии ---")
