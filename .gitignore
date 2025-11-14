@@ -8,6 +8,10 @@ tilda_session.json
 burp0_cookies.json
 burp0_headers.json
 
+# Request-specific JSON files
+getleads.json
+getproductslist.json
+
 # Screenshots
 *.png
 

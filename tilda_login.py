@@ -325,7 +325,10 @@ def setup_request_interceptor(page: Page):
     Args:
         page: Страница Playwright
     """
-    intercepted_requests = []
+    intercepted_requests = {
+        "getleads": None,
+        "getproductslist": None
+    }
 
     def handle_request(request: Request):
         # Фильтруем запросы к API лидов
@@ -333,10 +336,16 @@ def setup_request_interceptor(page: Page):
             try:
                 post_data = request.post_data
 
-                # Проверяем, содержит ли POST данные "comm": "getleads" или comm=getleads
+                # Определяем тип запроса
+                request_type = None
                 if post_data and ("comm=getleads" in post_data or '"comm": "getleads"' in post_data or '"comm":"getleads"' in post_data):
+                    request_type = "getleads"
+                elif post_data and ("comm=getproductslist" in post_data or '"comm": "getproductslist"' in post_data or '"comm":"getproductslist"' in post_data):
+                    request_type = "getproductslist"
+
+                if request_type:
                     print("\n" + "="*70)
-                    print("🎯 ПЕРЕХВАЧЕН ЦЕЛЕВОЙ ЗАПРОС getleads!")
+                    print(f"🎯 ПЕРЕХВАЧЕН ЦЕЛЕВОЙ ЗАПРОС {request_type}!")
                     print("="*70)
 
                     # Получаем заголовки
@@ -377,13 +386,13 @@ def setup_request_interceptor(page: Page):
                     print("="*70 + "\n")
 
                     # Сохраняем для дальнейшего использования
-                    intercepted_requests.append({
+                    intercepted_requests[request_type] = {
                         "url": request.url,
                         "method": request.method,
                         "headers": headers_without_cookie,
                         "cookies": cookies_dict,
                         "post_data": post_data
-                    })
+                    }
             except Exception as e:
                 print(f"Ошибка при обработке запроса: {e}")
 
@@ -448,6 +457,68 @@ def save_cookies_and_headers_to_files(context, page: Page):
 
     except Exception as e:
         print(f"Ошибка при сохранении cookies/headers: {e}")
+
+
+def save_request_specific_json_files(intercepted_requests: dict, context, page: Page):
+    """
+    Сохранение отдельных JSON файлов для каждого типа запроса (getleads, getproductslist)
+    Каждый файл содержит cookies и headers
+
+    Args:
+        intercepted_requests: Словарь с перехваченными запросами
+        context: Контекст браузера Playwright
+        page: Страница Playwright
+    """
+    try:
+        # Получаем cookies
+        cookies = context.cookies()
+        cookie_dict = {cookie['name']: cookie['value'] for cookie in cookies}
+
+        # Создаем стандартный набор headers
+        headers = {
+            "accept": "application/json, text/javascript, */*; q=0.01",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "origin": "https://tilda.ru",
+            "referer": page.url,
+            "user-agent": page.evaluate("navigator.userAgent"),
+            "x-requested-with": "XMLHttpRequest"
+        }
+
+        # Сохраняем отдельные файлы для каждого типа запроса
+        for request_type in ["getleads", "getproductslist"]:
+            if intercepted_requests.get(request_type):
+                # Используем cookies и headers из перехваченного запроса если они есть
+                request_data = intercepted_requests[request_type]
+                request_cookies = request_data.get("cookies", cookie_dict)
+                request_headers = request_data.get("headers", headers)
+
+                # Создаем JSON с cookies и headers
+                json_data = {
+                    "cookies": request_cookies,
+                    "headers": request_headers
+                }
+
+                # Сохраняем в файл
+                filename = f"{request_type}.json"
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=2, ensure_ascii=False)
+                print(f"✓ Данные для {request_type} сохранены в {filename}")
+            else:
+                # Если запрос не был перехвачен, создаем файл с базовыми данными
+                json_data = {
+                    "cookies": cookie_dict,
+                    "headers": headers
+                }
+
+                filename = f"{request_type}.json"
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=2, ensure_ascii=False)
+                print(f"✓ Данные для {request_type} сохранены в {filename} (базовые данные)")
+
+    except Exception as e:
+        print(f"Ошибка при сохранении отдельных JSON файлов: {e}")
 
 
 def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
@@ -545,6 +616,7 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                             # Сохранение cookies и headers в JSON файлы
                             print("\n--- Сохранение cookies и headers в JSON файлы ---")
                             save_cookies_and_headers_to_files(context, page)
+                            save_request_specific_json_files(intercepted_requests, context, page)
 
                             # Вывод cookies
                             cookies = context.cookies()
@@ -677,6 +749,7 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 # Сохранение cookies и headers в JSON файлы
                 print("\n--- Сохранение cookies и headers в JSON файлы ---")
                 save_cookies_and_headers_to_files(context, page)
+                save_request_specific_json_files(intercepted_requests, context, page)
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")
@@ -727,6 +800,7 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 # Сохранение cookies и headers в JSON файлы
                 print("\n--- Сохранение cookies и headers в JSON файлы ---")
                 save_cookies_and_headers_to_files(context, page)
+                save_request_specific_json_files(intercepted_requests, context, page)
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")

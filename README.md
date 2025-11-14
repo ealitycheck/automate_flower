@@ -13,10 +13,12 @@
   - Yandex SmartCaptcha
 - Автоматическое определение типа капчи с приоритетом
 - Решение капчи через RuCaptcha API
-- **Перехват и логирование API запросов** к /projects/submit/leads/
+- **Перехват и логирование API запросов** к /projects/submit/leads/ (getleads и getproductslist)
 - Переход на страницу проектов, затем на страницу лидов после входа
 - Экспорт cookies в формате Burp Suite (Python dict)
-- **Автоматическое сохранение cookies и headers в JSON файлы** (burp0_cookies.json и burp0_headers.json)
+- **Автоматическое сохранение cookies и headers в JSON файлы**:
+  - Общие файлы: burp0_cookies.json и burp0_headers.json
+  - Отдельные файлы для каждого типа запроса: getleads.json и getproductslist.json
 - Вывод полных заголовков HTTP запросов
 - Сохранение скриншотов результата
 - Проверка баланса RuCaptcha
@@ -123,6 +125,8 @@ automate_flower/
 ├── tilda_session.json   # Сохраненная сессия (создается автоматически, не коммитится)
 ├── burp0_cookies.json   # Cookies в JSON формате (создается автоматически, не коммитится)
 ├── burp0_headers.json   # Headers в JSON формате (создается автоматически, не коммитится)
+├── getleads.json        # Cookies и headers для запроса getleads (создается автоматически, не коммитится)
+├── getproductslist.json # Cookies и headers для запроса getproductslist (создается автоматически, не коммитится)
 ├── tilda_logged_in.png  # Скриншот страницы лидов (создается автоматически)
 └── tilda_before_submit.png  # Скриншот страницы входа (создается автоматически)
 ```
@@ -216,7 +220,9 @@ burp0_cookies = {"registered": "yes", "deviceid": "xcj8EP", "__ddg1_": "z9dVPCVA
 
 ### Автоматическое сохранение в JSON файлы
 
-Скрипт также автоматически сохраняет cookies и headers в JSON файлы для удобного использования:
+Скрипт автоматически сохраняет cookies и headers в несколько JSON файлов для удобного использования:
+
+#### Общие файлы (для совместимости):
 
 **burp0_cookies.json:**
 ```json
@@ -245,12 +251,94 @@ burp0_cookies = {"registered": "yes", "deviceid": "xcj8EP", "__ddg1_": "z9dVPCVA
 }
 ```
 
-**Использование JSON файлов в Python:**
+#### Отдельные файлы для каждого типа запроса:
+
+Для удобства работы с разными API эндпоинтами, скрипт также создает отдельные файлы для каждого типа запроса:
+
+**getleads.json:**
+```json
+{
+  "cookies": {
+    "registered": "yes",
+    "deviceid": "xcj8EP",
+    "__ddg1_": "z9dVPCVAXugpHR",
+    "PHPSESSID": "kmen31b5k7gjafs3b3gm",
+    "userid": "1017",
+    "hash": "9cb8b968a3b71b41a3",
+    "lang": "RU"
+  },
+  "headers": {
+    "accept": "application/json, text/javascript, */*; q=0.01",
+    "accept-encoding": "gzip, deflate, br",
+    "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "origin": "https://tilda.ru",
+    "referer": "https://tilda.ru/projects/leads/?projectid=2050405",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "x-requested-with": "XMLHttpRequest"
+  }
+}
+```
+
+**getproductslist.json:**
+```json
+{
+  "cookies": {
+    "registered": "yes",
+    "deviceid": "xcj8EP",
+    "__ddg1_": "z9dVPCVAXugpHR",
+    "PHPSESSID": "kmen31b5k7gjafs3b3gm",
+    "userid": "1017",
+    "hash": "9cb8b968a3b71b41a3",
+    "lang": "RU"
+  },
+  "headers": {
+    "accept": "application/json, text/javascript, */*; q=0.01",
+    "accept-encoding": "gzip, deflate, br",
+    "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "origin": "https://tilda.ru",
+    "referer": "https://tilda.ru/projects/leads/?projectid=2050405",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "x-requested-with": "XMLHttpRequest"
+  }
+}
+```
+
+**Использование отдельных JSON файлов в Python:**
 ```python
 import json
 import requests
 
-# Загрузка cookies и headers из файлов
+# Загрузка данных для запроса getleads
+with open('getleads.json', 'r') as f:
+    getleads_data = json.load(f)
+
+cookies = getleads_data['cookies']
+headers = getleads_data['headers']
+
+# Выполнение запроса getleads
+url = "https://tilda.ru/projects/submit/leads/"
+data = "comm=getleads&projectid=2050405&curpage=1"
+response = requests.post(url, headers=headers, cookies=cookies, data=data)
+print(response.json())
+
+# Загрузка данных для запроса getproductslist
+with open('getproductslist.json', 'r') as f:
+    products_data = json.load(f)
+
+# Выполнение запроса getproductslist
+data = "comm=getproductslist&projectid=2050405"
+response = requests.post(url, headers=products_data['headers'], cookies=products_data['cookies'], data=data)
+print(response.json())
+```
+
+**Использование старого формата (для совместимости):**
+```python
+import json
+import requests
+
+# Загрузка cookies и headers из отдельных файлов
 with open('burp0_cookies.json', 'r') as f:
     cookies = json.load(f)
 
