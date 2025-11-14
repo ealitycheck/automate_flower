@@ -3,9 +3,11 @@
 """
 
 import os
+import json
 import time
+from pathlib import Path
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright, Page, TimeoutError as PlaywrightTimeout, Request
 from captcha_solver import RuCaptchaSolver
 
 
@@ -15,6 +17,9 @@ load_dotenv()
 TILDA_EMAIL = os.getenv("TILDA_EMAIL")
 TILDA_PASSWORD = os.getenv("TILDA_PASSWORD")
 RUCAPTCHA_API_KEY = os.getenv("RUCAPTCHA_API_KEY")
+
+# Путь к файлу сессии
+SESSION_FILE = "tilda_session.json"
 
 
 def detect_captcha_type(page: Page, wait_for_load: bool = True) -> dict:
@@ -274,6 +279,91 @@ def solve_and_inject_captcha(page: Page, captcha_solver: RuCaptchaSolver) -> boo
         return False
 
 
+def save_session(context, filename: str = SESSION_FILE):
+    """
+    Сохранение сессии браузера в файл
+
+    Args:
+        context: Контекст браузера Playwright
+        filename: Имя файла для сохранения
+    """
+    try:
+        context.storage_state(path=filename)
+        print(f"✓ Сессия сохранена в {filename}")
+    except Exception as e:
+        print(f"Ошибка сохранения сессии: {e}")
+
+
+def load_session(filename: str = SESSION_FILE) -> dict:
+    """
+    Загрузка сохраненной сессии из файла
+
+    Args:
+        filename: Имя файла с сессией
+
+    Returns:
+        Словарь с данными сессии или None если файл не найден
+    """
+    if not Path(filename).exists():
+        print(f"Файл сессии {filename} не найден")
+        return None
+
+    try:
+        with open(filename, 'r') as f:
+            session_data = json.load(f)
+        print(f"✓ Сессия загружена из {filename}")
+        return session_data
+    except Exception as e:
+        print(f"Ошибка загрузки сессии: {e}")
+        return None
+
+
+def setup_request_interceptor(page: Page):
+    """
+    Настройка перехватчика запросов для логирования API запросов к лидам
+
+    Args:
+        page: Страница Playwright
+    """
+    intercepted_requests = []
+
+    def handle_request(request: Request):
+        # Фильтруем запросы к API лидов
+        if "projects/submit/leads" in request.url or "getleads" in request.url.lower():
+            print("\n" + "="*60)
+            print(f"🔍 Перехвачен запрос: {request.method} {request.url}")
+            print("="*60)
+
+            # Получаем заголовки
+            headers = request.headers
+            print("\n📋 Headers:")
+            print("-"*60)
+            for key, value in headers.items():
+                print(f"{key}: {value}")
+
+            # Получаем данные POST запроса если есть
+            try:
+                post_data = request.post_data
+                if post_data:
+                    print("\n📦 POST Data:")
+                    print("-"*60)
+                    print(post_data)
+            except:
+                pass
+
+            print("="*60 + "\n")
+
+            # Сохраняем для дальнейшего использования
+            intercepted_requests.append({
+                "url": request.url,
+                "method": request.method,
+                "headers": headers
+            })
+
+    page.on("request", handle_request)
+    return intercepted_requests
+
+
 def format_cookies_for_burp(cookies: list) -> str:
     """
     Форматирование cookies в формат Burp Suite (Python dict)
@@ -322,13 +412,69 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
         # Запуск браузера
         print("Запуск браузера...")
         browser = p.chromium.launch(headless=headless, slow_mo=slow_mo)
-        context = browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        )
+
+        # Попытка загрузить сохраненную сессию
+        session_data = load_session()
+
+        # Создание контекста с сессией или без
+        if session_data:
+            print("Попытка использовать сохраненную сессию...")
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                storage_state=session_data
+            )
+        else:
+            context = browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
+
         page = context.new_page()
 
+        # Настройка перехватчика запросов
+        intercepted_requests = setup_request_interceptor(page)
+
         try:
+            # Проверка валидности сохраненной сессии
+            if session_data:
+                print("Проверка валидности сессии...")
+                try:
+                    leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
+                    page.goto(leads_url, wait_until="networkidle", timeout=15000)
+                    page.wait_for_timeout(2000)
+
+                    # Проверяем, не попали ли мы на страницу логина
+                    current_url = page.url
+                    if "/login" in current_url.lower():
+                        print("⚠ Сессия устарела, требуется повторный вход")
+                        session_data = None  # Сбрасываем сессию
+                    else:
+                        print("✓ Сессия валидна! Пропускаем авторизацию")
+
+                        # Ждем загрузку API запроса
+                        page.wait_for_timeout(3000)
+
+                        # Вывод cookies
+                        cookies = context.cookies()
+                        print(f"\nПолучено {len(cookies)} cookies")
+                        burp_cookies = format_cookies_for_burp(cookies)
+                        print("\n" + "="*60)
+                        print("Cookies в формате Burp Suite:")
+                        print("="*60)
+                        print(burp_cookies)
+                        print("="*60)
+
+                        # Скриншот
+                        page.screenshot(path="tilda_logged_in.png")
+                        print("\nСкриншот сохранен: tilda_logged_in.png")
+
+                        return True
+                except Exception as e:
+                    print(f"Ошибка проверки сессии: {e}")
+                    session_data = None
+
+            # Если сессии нет или она невалидна - выполняем обычный вход
             # Переход на страницу входа
             print("Переход на страницу входа Tilda...")
             page.goto("https://tilda.ru/login/", wait_until="networkidle")
@@ -401,8 +547,12 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
                 print(f"Переход на {leads_url}...")
                 page.goto(leads_url, wait_until="networkidle")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(3000)  # Ждем API запросы
                 print("Страница лидов загружена")
+
+                # Сохранение сессии для последующего использования
+                print("\n--- Сохранение сессии ---")
+                save_session(context)
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")
@@ -435,8 +585,12 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
                 print(f"Переход на {leads_url}...")
                 page.goto(leads_url, wait_until="networkidle")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(3000)  # Ждем API запросы
                 print("Страница лидов загружена")
+
+                # Сохранение сессии для последующего использования
+                print("\n--- Сохранение сессии ---")
+                save_session(context)
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")

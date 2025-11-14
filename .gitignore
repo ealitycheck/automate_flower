@@ -1,6 +1,12 @@
 # Environment variables
 .env
 
+# Session files
+tilda_session.json
+
+# Screenshots
+*.png
+
 # Python
 __pycache__/
 *.py[cod]
