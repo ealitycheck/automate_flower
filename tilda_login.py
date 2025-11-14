@@ -888,9 +888,9 @@ if __name__ == "__main__":
     print("=" * 60)
     print()
 
-    # Запуск с видимым браузером для отладки
-    # Для фонового режима установите headless=True
-    success = login_to_tilda(headless=False, slow_mo=100)
+    # Запуск в headless режиме (без графического интерфейса)
+    # Для режима с видимым браузером установите headless=False
+    success = login_to_tilda(headless=True, slow_mo=0)
 
     if success:
         print("\n✓ Скрипт завершен успешно!")
