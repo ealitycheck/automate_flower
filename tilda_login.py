@@ -468,37 +468,73 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 print("Проверка валидности сессии...")
                 try:
                     leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
-                    page.goto(leads_url, wait_until="networkidle", timeout=15000)
+                    print(f"Попытка загрузить страницу: {leads_url}")
+
+                    # Используем более мягкое условие ожидания и больший таймаут
+                    page.goto(leads_url, wait_until="domcontentloaded", timeout=30000)
+                    print(f"Страница загружена, текущий URL: {page.url}")
+
+                    # Ждем немного для стабильности
                     page.wait_for_timeout(2000)
 
                     # Проверяем, не попали ли мы на страницу логина
                     current_url = page.url
                     if "/login" in current_url.lower():
-                        print("⚠ Сессия устарела, требуется повторный вход")
+                        print("⚠ Сессия устарела (редирект на /login), требуется повторный вход")
                         session_data = None  # Сбрасываем сессию
                     else:
-                        print("✓ Сессия валидна! Пропускаем авторизацию")
+                        # Дополнительная проверка: проверяем наличие элементов страницы лидов
+                        # или отсутствие формы логина
+                        has_login_form = page.locator('form:has(input[type="password"])').count() > 0
 
-                        # Ждем загрузку API запроса
-                        page.wait_for_timeout(3000)
+                        if has_login_form:
+                            print("⚠ Сессия устарела (обнаружена форма логина), требуется повторный вход")
+                            session_data = None
+                        else:
+                            print("✓ Сессия валидна! Пропускаем авторизацию")
 
-                        # Вывод cookies
-                        cookies = context.cookies()
-                        print(f"\nПолучено {len(cookies)} cookies")
-                        burp_cookies = format_cookies_for_burp(cookies)
-                        print("\n" + "="*60)
-                        print("Cookies в формате Burp Suite:")
-                        print("="*60)
-                        print(burp_cookies)
-                        print("="*60)
+                            # Ждем загрузку API запроса
+                            print("Ожидание загрузки API запросов...")
+                            page.wait_for_timeout(3000)
 
-                        # Скриншот
-                        page.screenshot(path="tilda_logged_in.png")
-                        print("\nСкриншот сохранен: tilda_logged_in.png")
+                            # Вывод cookies
+                            cookies = context.cookies()
+                            print(f"\nПолучено {len(cookies)} cookies")
+                            burp_cookies = format_cookies_for_burp(cookies)
+                            print("\n" + "="*60)
+                            print("Cookies в формате Burp Suite:")
+                            print("="*60)
+                            print(burp_cookies)
+                            print("="*60)
 
-                        return True
+                            # Скриншот
+                            page.screenshot(path="tilda_logged_in.png")
+                            print("\nСкриншот сохранен: tilda_logged_in.png")
+
+                            return True
+
+                except PlaywrightTimeout as e:
+                    print(f"⚠ Таймаут при проверке сессии (страница загружалась > 30 секунд)")
+                    print(f"Детали: {e}")
+                    print("Попытка проверить текущее состояние страницы...")
+
+                    # Даже при таймауте страница могла частично загрузиться
+                    # Проверяем, не на странице ли логина мы
+                    try:
+                        current_url = page.url
+                        if "/login" in current_url.lower():
+                            print("⚠ Редирект на страницу логина - сессия невалидна")
+                            session_data = None
+                        else:
+                            print("⚠ Страница не перенаправила на /login, но таймаут - продолжаем с повторным входом для надежности")
+                            session_data = None
+                    except:
+                        print("⚠ Не удалось определить состояние - выполняем повторный вход")
+                        session_data = None
+
                 except Exception as e:
-                    print(f"Ошибка проверки сессии: {e}")
+                    print(f"⚠ Непредвиденная ошибка проверки сессии: {type(e).__name__}: {e}")
+                    print("Выполняем повторный вход для надежности")
                     session_data = None
 
             # Если сессии нет или она невалидна - выполняем обычный вход
