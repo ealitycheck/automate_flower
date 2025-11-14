@@ -17,38 +17,77 @@ TILDA_PASSWORD = os.getenv("TILDA_PASSWORD")
 RUCAPTCHA_API_KEY = os.getenv("RUCAPTCHA_API_KEY")
 
 
-def detect_captcha_type(page: Page) -> dict:
+def detect_captcha_type(page: Page, wait_for_load: bool = True) -> dict:
     """
     Определение типа капчи на странице
 
     Args:
         page: Страница Playwright
+        wait_for_load: Ожидать загрузки капчи
 
     Returns:
         Словарь с информацией о капче: {type: str, site_key: str}
     """
     print("Определение типа капчи...")
 
-    # Проверка reCAPTCHA v2
-    recaptcha_v2 = page.locator('iframe[src*="google.com/recaptcha"]').first
-    if recaptcha_v2.count() > 0:
+    if wait_for_load:
+        print("Ожидание загрузки капчи...")
+        # Ждем появления iframe капчи (до 10 секунд)
         try:
-            # Получение site-key из родительского элемента
-            site_key = page.evaluate("""() => {
-                const elem = document.querySelector('.g-recaptcha');
-                return elem ? elem.getAttribute('data-sitekey') : null;
-            }""")
-            if site_key:
-                print(f"Обнаружена reCAPTCHA v2, site-key: {site_key}")
-                return {"type": "recaptcha_v2", "site_key": site_key}
-        except Exception as e:
-            print(f"Ошибка при определении reCAPTCHA v2: {e}")
+            page.wait_for_selector('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="captcha-api.yandex"]', timeout=10000)
+            page.wait_for_timeout(2000)  # Дополнительная пауза для полной загрузки
+        except PlaywrightTimeout:
+            print("Капча не загрузилась за отведенное время, продолжаем поиск...")
+
+    # Проверка reCAPTCHA v2 - расширенный поиск
+    print("Проверка reCAPTCHA v2...")
+    try:
+        # Несколько способов найти site-key
+        site_key = page.evaluate("""() => {
+            // Способ 1: стандартный элемент .g-recaptcha
+            let elem = document.querySelector('.g-recaptcha');
+            if (elem && elem.getAttribute('data-sitekey')) {
+                return elem.getAttribute('data-sitekey');
+            }
+
+            // Способ 2: любой элемент с data-sitekey
+            elem = document.querySelector('[data-sitekey]');
+            if (elem) {
+                return elem.getAttribute('data-sitekey');
+            }
+
+            // Способ 3: поиск в скриптах
+            const scripts = Array.from(document.querySelectorAll('script'));
+            for (const script of scripts) {
+                const text = script.textContent || script.innerHTML;
+                const match = text.match(/['"&?]sitekey['"]?\s*[:=]\s*['"]([^'"]+)['"]/i);
+                if (match) return match[1];
+            }
+
+            // Способ 4: поиск в iframe src
+            const iframes = Array.from(document.querySelectorAll('iframe[src*="recaptcha"]'));
+            for (const iframe of iframes) {
+                const src = iframe.getAttribute('src');
+                const match = src.match(/[&?]k=([^&]+)/);
+                if (match) return match[1];
+            }
+
+            return null;
+        }""")
+
+        if site_key:
+            print(f"Обнаружена reCAPTCHA v2, site-key: {site_key}")
+            return {"type": "recaptcha_v2", "site_key": site_key}
+    except Exception as e:
+        print(f"Ошибка при определении reCAPTCHA v2: {e}")
 
     # Проверка reCAPTCHA v3
+    print("Проверка reCAPTCHA v3...")
     recaptcha_v3_key = page.evaluate("""() => {
         const scripts = Array.from(document.querySelectorAll('script'));
         for (const script of scripts) {
-            const match = script.textContent?.match(/grecaptcha\\.execute\\(['"]([^'"]+)['"]/);
+            const text = script.textContent || script.innerHTML;
+            const match = text.match(/grecaptcha\.execute\(['"]([^'"]+)['"]/);
             if (match) return match[1];
         }
         return null;
@@ -58,6 +97,7 @@ def detect_captcha_type(page: Page) -> dict:
         return {"type": "recaptcha_v3", "site_key": recaptcha_v3_key}
 
     # Проверка hCaptcha
+    print("Проверка hCaptcha...")
     hcaptcha = page.locator('iframe[src*="hcaptcha.com"]').first
     if hcaptcha.count() > 0:
         try:
@@ -72,6 +112,7 @@ def detect_captcha_type(page: Page) -> dict:
             print(f"Ошибка при определении hCaptcha: {e}")
 
     # Проверка Yandex SmartCaptcha
+    print("Проверка Yandex SmartCaptcha...")
     yandex_captcha = page.evaluate("""() => {
         const elem = document.querySelector('[data-smartcaptcha-sitekey]');
         return elem ? elem.getAttribute('data-smartcaptcha-sitekey') : null;
@@ -126,9 +167,46 @@ def solve_and_inject_captcha(page: Page, captcha_solver: RuCaptchaSolver) -> boo
     print("Внедрение токена капчи...")
     try:
         if captcha_type == "recaptcha_v2":
-            page.evaluate(f"""
-                document.getElementById('g-recaptcha-response').innerHTML = '{token}';
+            # Для reCAPTCHA v2 нужно установить токен в textarea и вызвать callback
+            result = page.evaluate(f"""
+                (function() {{
+                    try {{
+                        // Находим textarea для ответа
+                        let textarea = document.getElementById('g-recaptcha-response');
+                        if (!textarea) {{
+                            textarea = document.querySelector('[name="g-recaptcha-response"]');
+                        }}
+
+                        if (textarea) {{
+                            // Делаем textarea видимым временно
+                            textarea.style.display = 'block';
+                            textarea.innerHTML = '{token}';
+                            textarea.value = '{token}';
+
+                            // Вызываем callback если есть
+                            const recaptchaElement = document.querySelector('.g-recaptcha');
+                            if (recaptchaElement) {{
+                                const callback = recaptchaElement.getAttribute('data-callback');
+                                if (callback && typeof window[callback] === 'function') {{
+                                    window[callback]('{token}');
+                                }}
+                            }}
+
+                            // Проверяем наличие глобального callback
+                            if (typeof window.onRecaptchaSuccess === 'function') {{
+                                window.onRecaptchaSuccess('{token}');
+                            }}
+
+                            return 'success';
+                        }}
+                        return 'textarea not found';
+                    }} catch(e) {{
+                        return 'error: ' + e.message;
+                    }}
+                }})()
             """)
+            print(f"Результат внедрения reCAPTCHA v2: {result}")
+
         elif captcha_type == "recaptcha_v3":
             page.evaluate(f"""
                 document.querySelector('[name="g-recaptcha-response"]').value = '{token}';
@@ -144,6 +222,7 @@ def solve_and_inject_captcha(page: Page, captcha_solver: RuCaptchaSolver) -> boo
             """)
 
         print("Токен успешно внедрен")
+        page.wait_for_timeout(1000)  # Пауза после внедрения
         return True
 
     except Exception as e:
@@ -189,9 +268,19 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
         try:
             # Переход на страницу входа
             print("Переход на страницу входа Tilda...")
-            page.goto("https://tilda.ru/login/", wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
+            page.goto("https://tilda.ru/login/", wait_until="networkidle")
+            print("Страница загружена, ожидание загрузки всех элементов...")
+            page.wait_for_timeout(3000)
 
+            # Проверка и решение капчи ПЕРЕД заполнением формы
+            print("\n--- Этап 1: Определение и решение капчи ---")
+            if not solve_and_inject_captcha(page, captcha_solver):
+                print("Не удалось решить капчу")
+                # Делаем скриншот для отладки
+                page.screenshot(path="tilda_captcha_failed.png")
+                return False
+
+            print("\n--- Этап 2: Заполнение формы входа ---")
             # Ввод email
             print("Ввод email...")
             email_input = page.locator('input[name="email"], input[type="email"]').first
@@ -202,14 +291,14 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
             print("Ввод пароля...")
             password_input = page.locator('input[name="password"], input[type="password"]').first
             password_input.fill(TILDA_PASSWORD)
-            page.wait_for_timeout(500)
+            page.wait_for_timeout(1000)
 
-            # Решение капчи если присутствует
-            if not solve_and_inject_captcha(page, captcha_solver):
-                print("Не удалось решить капчу")
-                return False
+            # Скриншот перед отправкой
+            page.screenshot(path="tilda_before_submit.png")
+            print("Скриншот сохранен: tilda_before_submit.png")
 
             # Нажатие кнопки входа
+            print("\n--- Этап 3: Отправка формы ---")
             print("Нажатие кнопки входа...")
             login_button = page.locator('button[type="submit"], input[type="submit"]').first
             login_button.click()
