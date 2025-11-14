@@ -410,6 +410,46 @@ def format_cookies_for_burp(cookies: list) -> str:
     return f"burp0_cookies = {formatted_dict}"
 
 
+def save_cookies_and_headers_to_files(context, page: Page):
+    """
+    Сохранение cookies и headers в JSON файлы
+
+    Args:
+        context: Контекст браузера Playwright
+        page: Страница Playwright
+    """
+    try:
+        # Получаем cookies
+        cookies = context.cookies()
+        cookie_dict = {cookie['name']: cookie['value'] for cookie in cookies}
+
+        # Сохраняем cookies в JSON файл
+        with open('burp0_cookies.json', 'w', encoding='utf-8') as f:
+            json.dump(cookie_dict, f, indent=2, ensure_ascii=False)
+        print(f"✓ Cookies сохранены в burp0_cookies.json")
+
+        # Получаем headers из последнего запроса
+        # Создаем стандартный набор headers
+        headers = {
+            "accept": "application/json, text/javascript, */*; q=0.01",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "origin": "https://tilda.ru",
+            "referer": page.url,
+            "user-agent": page.evaluate("navigator.userAgent"),
+            "x-requested-with": "XMLHttpRequest"
+        }
+
+        # Сохраняем headers в JSON файл
+        with open('burp0_headers.json', 'w', encoding='utf-8') as f:
+            json.dump(headers, f, indent=2, ensure_ascii=False)
+        print(f"✓ Headers сохранены в burp0_headers.json")
+
+    except Exception as e:
+        print(f"Ошибка при сохранении cookies/headers: {e}")
+
+
 def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
     """
     Основная функция входа на Tilda
@@ -467,12 +507,11 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
             if session_data:
                 print("Проверка валидности сессии...")
                 try:
-                    leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
-                    print(f"Попытка загрузить страницу: {leads_url}")
-
-                    # Используем более мягкое условие ожидания и больший таймаут
-                    page.goto(leads_url, wait_until="domcontentloaded", timeout=30000)
-                    print(f"Страница загружена, текущий URL: {page.url}")
+                    # Сначала открываем страницу проектов
+                    projects_url = "https://tilda.ru/projects/"
+                    print(f"Попытка загрузить страницу проектов: {projects_url}")
+                    page.goto(projects_url, wait_until="domcontentloaded", timeout=30000)
+                    print(f"Страница проектов загружена, текущий URL: {page.url}")
 
                     # Ждем немного для стабильности
                     page.wait_for_timeout(2000)
@@ -483,7 +522,7 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                         print("⚠ Сессия устарела (редирект на /login), требуется повторный вход")
                         session_data = None  # Сбрасываем сессию
                     else:
-                        # Дополнительная проверка: проверяем наличие элементов страницы лидов
+                        # Дополнительная проверка: проверяем наличие элементов страницы проектов
                         # или отсутствие формы логина
                         has_login_form = page.locator('form:has(input[type="password"])').count() > 0
 
@@ -491,11 +530,21 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                             print("⚠ Сессия устарела (обнаружена форма логина), требуется повторный вход")
                             session_data = None
                         else:
-                            print("✓ Сессия валидна! Пропускаем авторизацию")
+                            print("✓ Сессия валидна! Переход на страницу лидов...")
+
+                            # Теперь переходим на страницу лидов
+                            leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
+                            print(f"Попытка загрузить страницу лидов: {leads_url}")
+                            page.goto(leads_url, wait_until="domcontentloaded", timeout=30000)
+                            print(f"Страница лидов загружена, текущий URL: {page.url}")
 
                             # Ждем загрузку API запроса
                             print("Ожидание загрузки API запросов...")
                             page.wait_for_timeout(3000)
+
+                            # Сохранение cookies и headers в JSON файлы
+                            print("\n--- Сохранение cookies и headers в JSON файлы ---")
+                            save_cookies_and_headers_to_files(context, page)
 
                             # Вывод cookies
                             cookies = context.cookies()
@@ -605,8 +654,16 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
             if not is_login_page and not login_form_exists and dashboard_elements > 0:
                 print("\n✓ Успешный вход в аккаунт Tilda!")
 
+                # Переход на страницу проектов
+                print("\n--- Этап 4: Переход на страницу проектов ---")
+                projects_url = "https://tilda.ru/projects/"
+                print(f"Переход на {projects_url}...")
+                page.goto(projects_url, wait_until="networkidle")
+                page.wait_for_timeout(2000)
+                print("Страница проектов загружена")
+
                 # Переход на страницу лидов
-                print("\n--- Этап 4: Переход на страницу лидов ---")
+                print("\n--- Этап 5: Переход на страницу лидов ---")
                 leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
                 print(f"Переход на {leads_url}...")
                 page.goto(leads_url, wait_until="networkidle")
@@ -616,6 +673,10 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 # Сохранение сессии для последующего использования
                 print("\n--- Сохранение сессии ---")
                 save_session(context)
+
+                # Сохранение cookies и headers в JSON файлы
+                print("\n--- Сохранение cookies и headers в JSON файлы ---")
+                save_cookies_and_headers_to_files(context, page)
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")
@@ -643,8 +704,16 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 print("\n✓ Вход выполнен (форма логина исчезла, но элементы кабинета не определены)")
                 print("Это может быть нормально, если структура страницы отличается")
 
+                # Переход на страницу проектов
+                print("\n--- Этап 4: Переход на страницу проектов ---")
+                projects_url = "https://tilda.ru/projects/"
+                print(f"Переход на {projects_url}...")
+                page.goto(projects_url, wait_until="networkidle")
+                page.wait_for_timeout(2000)
+                print("Страница проектов загружена")
+
                 # Переход на страницу лидов
-                print("\n--- Этап 4: Переход на страницу лидов ---")
+                print("\n--- Этап 5: Переход на страницу лидов ---")
                 leads_url = "https://tilda.ru/projects/leads/?projectid=2050405"
                 print(f"Переход на {leads_url}...")
                 page.goto(leads_url, wait_until="networkidle")
@@ -654,6 +723,10 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 # Сохранение сессии для последующего использования
                 print("\n--- Сохранение сессии ---")
                 save_session(context)
+
+                # Сохранение cookies и headers в JSON файлы
+                print("\n--- Сохранение cookies и headers в JSON файлы ---")
+                save_cookies_and_headers_to_files(context, page)
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")

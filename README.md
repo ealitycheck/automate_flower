@@ -14,8 +14,9 @@
 - Автоматическое определение типа капчи с приоритетом
 - Решение капчи через RuCaptcha API
 - **Перехват и логирование API запросов** к /projects/submit/leads/
-- Переход на страницу лидов после входа
+- Переход на страницу проектов, затем на страницу лидов после входа
 - Экспорт cookies в формате Burp Suite (Python dict)
+- **Автоматическое сохранение cookies и headers в JSON файлы** (burp0_cookies.json и burp0_headers.json)
 - Вывод полных заголовков HTTP запросов
 - Сохранение скриншотов результата
 - Проверка баланса RuCaptcha
@@ -120,6 +121,8 @@ automate_flower/
 ├── .gitignore           # Игнорируемые файлы
 ├── README.md            # Документация
 ├── tilda_session.json   # Сохраненная сессия (создается автоматически, не коммитится)
+├── burp0_cookies.json   # Cookies в JSON формате (создается автоматически, не коммитится)
+├── burp0_headers.json   # Headers в JSON формате (создается автоматически, не коммитится)
 ├── tilda_logged_in.png  # Скриншот страницы лидов (создается автоматически)
 └── tilda_before_submit.png  # Скриншот страницы входа (создается автоматически)
 ```
@@ -138,19 +141,21 @@ automate_flower/
 9. **Заполнение формы**: Ввод email и пароля
 10. **Отправка формы**: Клик по кнопке входа
 11. **Проверка успеха**: Множественная проверка (URL, форма входа, элементы кабинета, ошибки)
-12. **Переход на страницу лидов**: Автоматический переход на страницу leads с projectid=2050405
-13. **Перехват API запросов**: Логирование всех запросов к /projects/submit/leads/ (headers, cookies, POST data)
-14. **Сохранение сессии**: Сохранение контекста браузера в tilda_session.json
-15. **Экспорт cookies**: Извлечение и форматирование cookies в формате Burp Suite
-16. **Сохранение результата**: Создание скриншота страницы лидов
+12. **Переход на страницу проектов**: Автоматический переход на https://tilda.ru/projects/
+13. **Переход на страницу лидов**: Автоматический переход на страницу leads с projectid=2050405
+14. **Перехват API запросов**: Логирование всех запросов к /projects/submit/leads/ (headers, cookies, POST data)
+15. **Сохранение сессии**: Сохранение контекста браузера в tilda_session.json
+16. **Сохранение cookies и headers**: Автоматическое сохранение в burp0_cookies.json и burp0_headers.json
+17. **Экспорт cookies**: Извлечение и форматирование cookies в формате Burp Suite
+18. **Сохранение результата**: Создание скриншота страницы лидов
 
 ### При последующих запусках:
 1. **Инициализация**: Загрузка переменных окружения
 2. **Запуск браузера**: Открытие Chromium через Playwright
 3. **Загрузка сессии**: Чтение tilda_session.json и восстановление контекста браузера
-4. **Проверка валидности**: Переход на страницу лидов для проверки активности сессии
-5. **Если сессия валидна**: Пропуск этапов 6-11, переход к пункту 12
-6. **Если сессия устарела**: Автоматический переход к полному процессу входа (шаги 5-16)
+4. **Проверка валидности**: Переход на страницу проектов для проверки активности сессии
+5. **Если сессия валидна**: Пропуск этапов 6-11, переход на страницу лидов, сохранение cookies/headers
+6. **Если сессия устарела**: Автоматический переход к полному процессу входа (шаги 5-18)
 
 ## Примеры использования
 
@@ -208,6 +213,56 @@ burp0_cookies = {"registered": "yes", "deviceid": "xcj8EP", "__ddg1_": "z9dVPCVA
 - **Postman** для API запросов
 - **Python requests** для автоматизации
 - Любых других HTTP-клиентах
+
+### Автоматическое сохранение в JSON файлы
+
+Скрипт также автоматически сохраняет cookies и headers в JSON файлы для удобного использования:
+
+**burp0_cookies.json:**
+```json
+{
+  "registered": "yes",
+  "deviceid": "xcj8EP",
+  "__ddg1_": "z9dVPCVAXugpHR",
+  "PHPSESSID": "kmen31b5k7gjafs3b3gm",
+  "userid": "1017",
+  "hash": "9cb8b968a3b71b41a3",
+  "lang": "RU"
+}
+```
+
+**burp0_headers.json:**
+```json
+{
+  "accept": "application/json, text/javascript, */*; q=0.01",
+  "accept-encoding": "gzip, deflate, br",
+  "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+  "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+  "origin": "https://tilda.ru",
+  "referer": "https://tilda.ru/projects/leads/?projectid=2050405",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+  "x-requested-with": "XMLHttpRequest"
+}
+```
+
+**Использование JSON файлов в Python:**
+```python
+import json
+import requests
+
+# Загрузка cookies и headers из файлов
+with open('burp0_cookies.json', 'r') as f:
+    cookies = json.load(f)
+
+with open('burp0_headers.json', 'r') as f:
+    headers = json.load(f)
+
+# Выполнение запроса
+url = "https://tilda.ru/projects/submit/leads/"
+data = "comm=getleads&projectid=2050405&curpage=1"
+response = requests.post(url, headers=headers, cookies=cookies, data=data)
+print(response.json())
+```
 
 ### Пример перехваченных API запросов
 
