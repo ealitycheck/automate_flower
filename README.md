@@ -4,6 +4,7 @@
 
 ## Возможности
 
+- **Режим ожидания файла-триггера** для автоматического запуска обновления сессии
 - Автоматический вход на tilda.ru/login
 - **Сохранение и переиспользование сессии** (вход только при первом запуске)
 - Поддержка различных типов капчи:
@@ -13,10 +14,12 @@
   - Yandex SmartCaptcha
 - Автоматическое определение типа капчи с приоритетом
 - Решение капчи через RuCaptcha API
-- **Перехват и логирование API запросов** к /projects/submit/leads/
+- **Перехват и логирование API запросов** к /projects/submit/leads/ (getleads и getproductslist)
 - Переход на страницу проектов, затем на страницу лидов после входа
 - Экспорт cookies в формате Burp Suite (Python dict)
-- **Автоматическое сохранение cookies и headers в JSON файлы** (burp0_cookies.json и burp0_headers.json)
+- **Автоматическое сохранение cookies и headers в JSON файлы**:
+  - Общие файлы: burp0_cookies.json и burp0_headers.json
+  - Отдельные файлы для каждого типа запроса: getleads.json и getproductslist.json
 - Вывод полных заголовков HTTP запросов
 - Сохранение скриншотов результата
 - Проверка баланса RuCaptcha
@@ -89,23 +92,42 @@ RUCAPTCHA_API_KEY=your_rucaptcha_api_key
 
 ## Использование
 
-### Запуск с видимым браузером (для отладки)
+Скрипт работает в режиме ожидания файла-триггера для автоматического запуска.
+
+### Автоматический режим (headless)
+
+1. Запустите скрипт в фоновом режиме:
 
 ```bash
-python tilda_login.py
+python tilda_login.py &
 ```
 
-### Запуск в фоновом режиме
+Скрипт будет ожидать появления файла `need_update_ses`.
+
+2. Для запуска обновления сессии создайте файл-триггер:
+
+```bash
+touch need_update_ses
+```
+
+3. Скрипт автоматически:
+   - Обнаружит файл
+   - Запустится в headless режиме
+   - Обновит сессию и cookies
+   - Удалит файл-триггер по завершении
+
+### Запуск с видимым браузером (для отладки)
 
 Отредактируйте `tilda_login.py` и измените параметр:
 
 ```python
-success = login_to_tilda(headless=True, slow_mo=0)
+success = login_to_tilda(headless=False, slow_mo=100)
 ```
 
-Затем запустите:
+Затем создайте файл-триггер и запустите:
 
 ```bash
+touch need_update_ses
 python tilda_login.py
 ```
 
@@ -120,14 +142,24 @@ automate_flower/
 ├── .env                  # Ваши настройки (не коммитится)
 ├── .gitignore           # Игнорируемые файлы
 ├── README.md            # Документация
+├── need_update_ses      # Файл-триггер для запуска обновления (создается вручную, автоматически удаляется)
 ├── tilda_session.json   # Сохраненная сессия (создается автоматически, не коммитится)
 ├── burp0_cookies.json   # Cookies в JSON формате (создается автоматически, не коммитится)
 ├── burp0_headers.json   # Headers в JSON формате (создается автоматически, не коммитится)
+├── getleads.json        # Cookies и headers для запроса getleads (создается автоматически, не коммитится)
+├── getproductslist.json # Cookies и headers для запроса getproductslist (создается автоматически, не коммитится)
 ├── tilda_logged_in.png  # Скриншот страницы лидов (создается автоматически)
 └── tilda_before_submit.png  # Скриншот страницы входа (создается автоматически)
 ```
 
 ## Логика работы
+
+### Режим работы с файлом-триггером:
+1. **Запуск скрипта**: Скрипт запускается и переходит в режим ожидания
+2. **Ожидание триггера**: Проверка наличия файла `need_update_ses` каждую секунду
+3. **Обнаружение триггера**: При обнаружении файла запускается процесс обновления
+4. **Выполнение обновления**: Полный цикл обновления сессии (см. ниже)
+5. **Очистка**: Автоматическое удаление файла-триггера после завершения
 
 ### При первом запуске:
 1. **Инициализация**: Загрузка переменных окружения и создание экземпляра решателя капчи
@@ -143,19 +175,20 @@ automate_flower/
 11. **Проверка успеха**: Множественная проверка (URL, форма входа, элементы кабинета, ошибки)
 12. **Переход на страницу проектов**: Автоматический переход на https://tilda.ru/projects/
 13. **Переход на страницу лидов**: Автоматический переход на страницу leads с projectid=2050405
-14. **Перехват API запросов**: Логирование всех запросов к /projects/submit/leads/ (headers, cookies, POST data)
-15. **Сохранение сессии**: Сохранение контекста браузера в tilda_session.json
-16. **Сохранение cookies и headers**: Автоматическое сохранение в burp0_cookies.json и burp0_headers.json
-17. **Экспорт cookies**: Извлечение и форматирование cookies в формате Burp Suite
-18. **Сохранение результата**: Создание скриншота страницы лидов
+14. **Переход на страницу store**: Автоматический переход на https://store.tilda.ru/store/?projectid=2050405
+15. **Перехват API запросов**: Логирование всех запросов getleads и getproductslist к /projects/submit/leads/ (headers, cookies, POST data)
+16. **Сохранение сессии**: Сохранение контекста браузера в tilda_session.json
+17. **Сохранение cookies и headers**: Автоматическое сохранение в отдельные JSON-файлы (getleads.json, getproductslist.json, burp0_cookies.json, burp0_headers.json)
+18. **Экспорт cookies**: Извлечение и форматирование cookies в формате Burp Suite
+19. **Сохранение результата**: Создание скриншота страницы store
 
 ### При последующих запусках:
 1. **Инициализация**: Загрузка переменных окружения
 2. **Запуск браузера**: Открытие Chromium через Playwright
 3. **Загрузка сессии**: Чтение tilda_session.json и восстановление контекста браузера
 4. **Проверка валидности**: Переход на страницу проектов для проверки активности сессии
-5. **Если сессия валидна**: Пропуск этапов 6-11, переход на страницу лидов, сохранение cookies/headers
-6. **Если сессия устарела**: Автоматический переход к полному процессу входа (шаги 5-18)
+5. **Если сессия валидна**: Пропуск этапов 6-11, переход на страницу лидов, затем на страницу store, сохранение cookies/headers
+6. **Если сессия устарела**: Автоматический переход к полному процессу входа (шаги 5-19)
 
 ## Примеры использования
 
@@ -216,7 +249,9 @@ burp0_cookies = {"registered": "yes", "deviceid": "xcj8EP", "__ddg1_": "z9dVPCVA
 
 ### Автоматическое сохранение в JSON файлы
 
-Скрипт также автоматически сохраняет cookies и headers в JSON файлы для удобного использования:
+Скрипт автоматически сохраняет cookies и headers в несколько JSON файлов для удобного использования:
+
+#### Общие файлы (для совместимости):
 
 **burp0_cookies.json:**
 ```json
@@ -245,12 +280,94 @@ burp0_cookies = {"registered": "yes", "deviceid": "xcj8EP", "__ddg1_": "z9dVPCVA
 }
 ```
 
-**Использование JSON файлов в Python:**
+#### Отдельные файлы для каждого типа запроса:
+
+Для удобства работы с разными API эндпоинтами, скрипт также создает отдельные файлы для каждого типа запроса:
+
+**getleads.json:**
+```json
+{
+  "cookies": {
+    "registered": "yes",
+    "deviceid": "xcj8EP",
+    "__ddg1_": "z9dVPCVAXugpHR",
+    "PHPSESSID": "kmen31b5k7gjafs3b3gm",
+    "userid": "1017",
+    "hash": "9cb8b968a3b71b41a3",
+    "lang": "RU"
+  },
+  "headers": {
+    "accept": "application/json, text/javascript, */*; q=0.01",
+    "accept-encoding": "gzip, deflate, br",
+    "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "origin": "https://tilda.ru",
+    "referer": "https://tilda.ru/projects/leads/?projectid=2050405",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "x-requested-with": "XMLHttpRequest"
+  }
+}
+```
+
+**getproductslist.json:**
+```json
+{
+  "cookies": {
+    "registered": "yes",
+    "deviceid": "xcj8EP",
+    "__ddg1_": "z9dVPCVAXugpHR",
+    "PHPSESSID": "kmen31b5k7gjafs3b3gm",
+    "userid": "1017",
+    "hash": "9cb8b968a3b71b41a3",
+    "lang": "RU"
+  },
+  "headers": {
+    "accept": "application/json, text/javascript, */*; q=0.01",
+    "accept-encoding": "gzip, deflate, br",
+    "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+    "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "origin": "https://tilda.ru",
+    "referer": "https://tilda.ru/projects/leads/?projectid=2050405",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "x-requested-with": "XMLHttpRequest"
+  }
+}
+```
+
+**Использование отдельных JSON файлов в Python:**
 ```python
 import json
 import requests
 
-# Загрузка cookies и headers из файлов
+# Загрузка данных для запроса getleads
+with open('getleads.json', 'r') as f:
+    getleads_data = json.load(f)
+
+cookies = getleads_data['cookies']
+headers = getleads_data['headers']
+
+# Выполнение запроса getleads
+url = "https://tilda.ru/projects/submit/leads/"
+data = "comm=getleads&projectid=2050405&curpage=1"
+response = requests.post(url, headers=headers, cookies=cookies, data=data)
+print(response.json())
+
+# Загрузка данных для запроса getproductslist
+with open('getproductslist.json', 'r') as f:
+    products_data = json.load(f)
+
+# Выполнение запроса getproductslist
+data = "comm=getproductslist&projectid=2050405"
+response = requests.post(url, headers=products_data['headers'], cookies=products_data['cookies'], data=data)
+print(response.json())
+```
+
+**Использование старого формата (для совместимости):**
+```python
+import json
+import requests
+
+# Загрузка cookies и headers из отдельных файлов
 with open('burp0_cookies.json', 'r') as f:
     cookies = json.load(f)
 

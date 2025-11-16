@@ -325,7 +325,10 @@ def setup_request_interceptor(page: Page):
     Args:
         page: Страница Playwright
     """
-    intercepted_requests = []
+    intercepted_requests = {
+        "getleads": None,
+        "getproductslist": None
+    }
 
     def handle_request(request: Request):
         # Фильтруем запросы к API лидов
@@ -333,10 +336,16 @@ def setup_request_interceptor(page: Page):
             try:
                 post_data = request.post_data
 
-                # Проверяем, содержит ли POST данные "comm": "getleads" или comm=getleads
+                # Определяем тип запроса
+                request_type = None
                 if post_data and ("comm=getleads" in post_data or '"comm": "getleads"' in post_data or '"comm":"getleads"' in post_data):
+                    request_type = "getleads"
+                elif post_data and ("comm=getproductslist" in post_data or '"comm": "getproductslist"' in post_data or '"comm":"getproductslist"' in post_data):
+                    request_type = "getproductslist"
+
+                if request_type:
                     print("\n" + "="*70)
-                    print("🎯 ПЕРЕХВАЧЕН ЦЕЛЕВОЙ ЗАПРОС getleads!")
+                    print(f"🎯 ПЕРЕХВАЧЕН ЦЕЛЕВОЙ ЗАПРОС {request_type}!")
                     print("="*70)
 
                     # Получаем заголовки
@@ -377,13 +386,13 @@ def setup_request_interceptor(page: Page):
                     print("="*70 + "\n")
 
                     # Сохраняем для дальнейшего использования
-                    intercepted_requests.append({
+                    intercepted_requests[request_type] = {
                         "url": request.url,
                         "method": request.method,
                         "headers": headers_without_cookie,
                         "cookies": cookies_dict,
                         "post_data": post_data
-                    })
+                    }
             except Exception as e:
                 print(f"Ошибка при обработке запроса: {e}")
 
@@ -448,6 +457,76 @@ def save_cookies_and_headers_to_files(context, page: Page):
 
     except Exception as e:
         print(f"Ошибка при сохранении cookies/headers: {e}")
+
+
+def save_request_specific_json_files(intercepted_requests: dict, context, page: Page):
+    """
+    Сохранение отдельных JSON файлов для каждого типа запроса (getleads, getproductslist)
+    Каждый файл содержит cookies и headers
+
+    Args:
+        intercepted_requests: Словарь с перехваченными запросами
+        context: Контекст браузера Playwright
+        page: Страница Playwright
+    """
+    try:
+        # Получаем cookies
+        cookies = context.cookies()
+        cookie_dict = {cookie['name']: cookie['value'] for cookie in cookies}
+
+        # Создаем стандартный набор headers
+        headers = {
+            "accept": "application/json, text/javascript, */*; q=0.01",
+            "accept-encoding": "gzip, deflate, br",
+            "accept-language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
+            "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "origin": "https://tilda.ru",
+            "referer": page.url,
+            "user-agent": page.evaluate("navigator.userAgent"),
+            "x-requested-with": "XMLHttpRequest"
+        }
+
+        # Сохраняем отдельные файлы для каждого типа запроса
+        for request_type in ["getleads", "getproductslist"]:
+            if intercepted_requests.get(request_type):
+                # Используем cookies и headers из перехваченного запроса если они есть и не пустые
+                request_data = intercepted_requests[request_type]
+                request_cookies = request_data.get("cookies", {})
+                request_headers = request_data.get("headers", {})
+
+                # Если перехваченные cookies пустые, используем cookies из браузера
+                if not request_cookies:
+                    request_cookies = cookie_dict
+
+                # Если перехваченные headers пустые, используем стандартные headers
+                if not request_headers:
+                    request_headers = headers
+
+                # Создаем JSON с cookies и headers
+                json_data = {
+                    "cookies": request_cookies,
+                    "headers": request_headers
+                }
+
+                # Сохраняем в файл
+                filename = f"{request_type}.json"
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=2, ensure_ascii=False)
+                print(f"✓ Данные для {request_type} сохранены в {filename}")
+            else:
+                # Если запрос не был перехвачен, создаем файл с базовыми данными
+                json_data = {
+                    "cookies": cookie_dict,
+                    "headers": headers
+                }
+
+                filename = f"{request_type}.json"
+                with open(filename, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=2, ensure_ascii=False)
+                print(f"✓ Данные для {request_type} сохранены в {filename} (базовые данные)")
+
+    except Exception as e:
+        print(f"Ошибка при сохранении отдельных JSON файлов: {e}")
 
 
 def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
@@ -542,9 +621,21 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                             print("Ожидание загрузки API запросов...")
                             page.wait_for_timeout(3000)
 
+                            # Переход на страницу store для перехвата getproductslist
+                            print("\n--- Этап 6: Переход на страницу store ---")
+                            store_url = "https://store.tilda.ru/store/?projectid=2050405"
+                            print(f"Попытка загрузить страницу store: {store_url}")
+                            page.goto(store_url, wait_until="domcontentloaded", timeout=30000)
+                            print(f"Страница store загружена, текущий URL: {page.url}")
+
+                            # Ждем загрузку API запроса getproductslist
+                            print("Ожидание загрузки API запросов getproductslist...")
+                            page.wait_for_timeout(3000)
+
                             # Сохранение cookies и headers в JSON файлы
                             print("\n--- Сохранение cookies и headers в JSON файлы ---")
                             save_cookies_and_headers_to_files(context, page)
+                            save_request_specific_json_files(intercepted_requests, context, page)
 
                             # Вывод cookies
                             cookies = context.cookies()
@@ -670,6 +761,14 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 page.wait_for_timeout(3000)  # Ждем API запросы
                 print("Страница лидов загружена")
 
+                # Переход на страницу store для перехвата getproductslist
+                print("\n--- Этап 6: Переход на страницу store ---")
+                store_url = "https://store.tilda.ru/store/?projectid=2050405"
+                print(f"Переход на {store_url}...")
+                page.goto(store_url, wait_until="networkidle")
+                page.wait_for_timeout(3000)  # Ждем API запросы getproductslist
+                print("Страница store загружена")
+
                 # Сохранение сессии для последующего использования
                 print("\n--- Сохранение сессии ---")
                 save_session(context)
@@ -677,6 +776,7 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 # Сохранение cookies и headers в JSON файлы
                 print("\n--- Сохранение cookies и headers в JSON файлы ---")
                 save_cookies_and_headers_to_files(context, page)
+                save_request_specific_json_files(intercepted_requests, context, page)
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")
@@ -720,6 +820,14 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 page.wait_for_timeout(3000)  # Ждем API запросы
                 print("Страница лидов загружена")
 
+                # Переход на страницу store для перехвата getproductslist
+                print("\n--- Этап 6: Переход на страницу store ---")
+                store_url = "https://store.tilda.ru/store/?projectid=2050405"
+                print(f"Переход на {store_url}...")
+                page.goto(store_url, wait_until="networkidle")
+                page.wait_for_timeout(3000)  # Ждем API запросы getproductslist
+                print("Страница store загружена")
+
                 # Сохранение сессии для последующего использования
                 print("\n--- Сохранение сессии ---")
                 save_session(context)
@@ -727,6 +835,7 @@ def login_to_tilda(headless: bool = False, slow_mo: int = 0) -> bool:
                 # Сохранение cookies и headers в JSON файлы
                 print("\n--- Сохранение cookies и headers в JSON файлы ---")
                 save_cookies_and_headers_to_files(context, page)
+                save_request_specific_json_files(intercepted_requests, context, page)
 
                 # Сохранение скриншота
                 page.screenshot(path="tilda_logged_in.png")
@@ -779,13 +888,30 @@ if __name__ == "__main__":
     print("=" * 60)
     print()
 
-    # Запуск с видимым браузером для отладки
-    # Для фонового режима установите headless=True
-    success = login_to_tilda(headless=False, slow_mo=100)
+    # Ожидание файла-триггера
+    trigger_file = Path("need_update_ses")
+    print(f"Ожидание файла-триггера: {trigger_file}")
 
-    if success:
-        print("\n✓ Скрипт завершен успешно!")
-        exit(0)
-    else:
-        print("\n✗ Скрипт завершен с ошибкой")
-        exit(1)
+    while not trigger_file.exists():
+        time.sleep(1)  # Проверяем каждую секунду
+
+    print(f"✓ Файл-триггер обнаружен, запуск скрипта...")
+
+    try:
+        # Запуск в headless режиме (без графического интерфейса)
+        # Для режима с видимым браузером установите headless=False
+        success = login_to_tilda(headless=True, slow_mo=0)
+
+        if success:
+            print("\n✓ Скрипт завершен успешно!")
+            exit_code = 0
+        else:
+            print("\n✗ Скрипт завершен с ошибкой")
+            exit_code = 1
+    finally:
+        # Удаление файла-триггера в любом случае
+        if trigger_file.exists():
+            trigger_file.unlink()
+            print(f"✓ Файл-триггер {trigger_file} удален")
+
+    exit(exit_code)
